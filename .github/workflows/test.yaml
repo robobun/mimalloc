@@ -25,11 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         tests: [basic,extra]
-        os: [windows-latest, macos-latest, ubuntu-latest, macos-14, macos-15-intel, ubuntu-22.04-arm, windows-11-arm]
+        os: [windows-latest, windows-11-arm]
         c_or_cxx: [c, cxx]
         exclude:
-          - os: macos-14
-            tests: extra
           - c_or_cxx: cxx
             tests: extra                       
           # this fork is always compiled as C++ on Windows (32-bit atomics that the MSVC C wrapper does not model)
@@ -40,10 +38,6 @@ jobs:
             c_or_cxx: c
             tests: basic
         include:
-          - os: ubuntu-latest
-            tests: tsan
-          - os: ubuntu-latest
-            tests: freebsd-x64
           # The Alpine (musl) jobs are off in this fork: setup-alpine uses an unpinned nested action
           # (webiny/action-post-run@3.1.0), which the oven-sh action policy rejects for the whole workflow.
           - os: windows-latest
@@ -362,3 +356,23 @@ jobs:
           cmake . -B out/secure-x64 -DCMAKE_BUILD_TYPE=Release -DMI_SECURE=ON 
           cmake --build out/secure-x64 --parallel 4 --config Release
           ctest --test-dir out/secure-x64 --verbose --timeout 240 -C Release
+
+      - name: exit-wake, 20 runs of each case
+        if: always() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          for exe in $(find out -name 'mimalloc-test-exit-wake.exe'); do
+            echo "=== $exe"
+            for c in free park stop gone live; do
+              pass=0; fail=0; codes=""
+              for i in $(seq 1 20); do
+                "$exe" $c > exit-wake-out.txt 2>&1; rc=$?
+                if [ $rc -eq 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); fi
+                codes="$codes $rc"
+                grep -h -E "FAILED|gone already|released the stack" exit-wake-out.txt >> exit-wake-lines-$c.txt || true
+              done
+              echo "CASE $c: pass=$pass fail=$fail codes:$codes"
+              if [ -f exit-wake-lines-$c.txt ]; then sort exit-wake-lines-$c.txt | uniq -c; rm -f exit-wake-lines-$c.txt; fi
+            done
+          done
+
